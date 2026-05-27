@@ -1,0 +1,21 @@
+experiment:
+  name: "deepshift"         # resnet20 | deepshift | apot | denseshift
+  dataset: "cifar10"        # cifar10 | svhn | cifar100 | stl10 | tiny_imagenet
+  seed: 42
+  phase: 1
+
+model:
+  type: "baseline"          # baseline = src.models.resnet20.build_model
+
+training:
+  epochs: 200
+  batch_size: 256
+  lr: 0.1
+  momentum: 0.9
+  weight_decay: 5.0e-4
+  warmup_epochs: 0
+  clip_grad: 0.0
+
+output:
+  checkpoint_dir: "checkpoints/phase1"
+  log_dir: "logs/phase1"

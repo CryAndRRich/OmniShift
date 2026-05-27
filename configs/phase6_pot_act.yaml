@@ -1,0 +1,27 @@
+experiment:
+  name: "sparseshift_learnable_potbn_w30_act"  # sparseshift_fixed50_potbn_w30_act | sparseshift_learnable_potbn_w30_act
+  dataset: "cifar10"
+  seed: 42
+  phase: 6
+
+model:
+  type: "pot_act"        # src.models.resnet20_pot_act.build_model
+  sparse_mode: "learnable"  # fixed | learnable
+  sparsity_ratio: 0.5    # used for fixed mode only
+  bn_warmup: 30          # epochs before PoT-BN and PoT activations both activate
+  act_levels: 8          # non-zero PoT grid points per PoTActivation layer
+  act_alpha_init: 4.0    # initial learnable clip α_max for activations
+
+training:
+  epochs: 200
+  batch_size: 256
+  lr: 0.1
+  momentum: 0.9
+  weight_decay: 5.0e-4
+  warmup_epochs: 0
+  sparsity_lambda: 1.0e-4
+  clip_grad: 0.0
+
+output:
+  checkpoint_dir: "checkpoints/phase6"
+  log_dir: "logs/phase6"
