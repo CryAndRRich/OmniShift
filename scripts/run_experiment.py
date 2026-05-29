@@ -42,6 +42,8 @@ def _build_model(cfg: dict, num_classes: int, in_channels: int):
         from src.models.resnet20_ewgs import build_model
     elif mtype == "pot_act":
         from src.models.resnet20_pot_act import build_model
+    elif mtype == "omnishift_v2":
+        from src.models.resnet20_omnishift_v2 import build_model
     else:
         raise ValueError(f"Unknown model type: {mtype!r}")
     return build_model(name, num_classes=num_classes, in_channels=in_channels)

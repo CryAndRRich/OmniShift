@@ -59,12 +59,18 @@
 
 ## Phase 5 — P4 + EWGS Gradient Estimator
 
-*Base: Phase 4 | Thay STE → EWGS (λ=0.02) trong tất cả quantizers*
+*Base: Phase 4 | Thay STE → EWGS (λ=0.02) trong tất cả quantizers | Forward pass giống hệt P4*
 
-| Config | CIFAR-10 | SVHN | Sparsity | Energy (GpJ) | vs P4 |
+| Config | CIFAR-10 | SVHN | Sparsity (C10 / SVHN) | Energy (GpJ) | vs P4 (energy) |
 |---|---|---|---|---|---|
-| sparseshift_fixed50_potbn_w30 + EWGS | TBD | TBD | ~50% | TBD | — |
-| sparseshift_learnable_potbn_w30 + EWGS | TBD | TBD | TBD | TBD | — |
+| sparseshift_fixed50_potbn_w30_ewgs | **91.09%** | **96.55%** | 50.00% / 50.00% | **0.0230** | 0% (identical forward) |
+| sparseshift_learnable_potbn_w30_ewgs | **91.09%** | **96.39%** | 76.24% / 87.33% | **0.0121 / 0.0075** | −28.4% / −24.2% |
+
+**Key findings:**
+- EWGS did **not** improve accuracy (−0.06 to −0.24 pp vs P4) — within seed variance
+- EWGS **dramatically increased learnable sparsity**: +11.6 pp on CIFAR-10, +5.7 pp on SVHN
+- Energy reduction via higher sparsity: **15.6× on CIFAR-10, 25.2× on SVHN** vs full-precision baseline (learnable)
+- Primary EWGS benefit: sparsity amplification → energy reduction, not gradient quality
 
 ---
 
@@ -72,10 +78,17 @@
 
 *Base: Phase 4 | Thêm PoTActivation sau mỗi ReLU — fully multiply-free end-to-end*
 
-| Config | CIFAR-10 | SVHN | Sparsity | Energy (GpJ) | vs P4 |
+| Config | CIFAR-10 | SVHN | Sparsity (C10 / SVHN) | Energy (GpJ) | vs P4 (acc) |
 |---|---|---|---|---|---|
-| sparseshift_fixed50_potbn_w30 + PoTAct | TBD | TBD | ~50% | TBD | — |
-| sparseshift_learnable_potbn_w30 + PoTAct | TBD | TBD | TBD | TBD | — |
+| sparseshift_fixed50_potbn_w30_act | **89.68%** | **96.16%** | 50.00% / 50.00% | **0.0231** | −1.65 / −0.49 pp |
+| sparseshift_learnable_potbn_w30_act | **89.77%** | **96.02%** | 58.79% / 74.97% | **0.0194 / 0.0127** | −1.44 / −0.43 pp |
+
+**Key findings:**
+- PoT activations cost **~1.5 pp** on CIFAR-10, **~0.5 pp** on SVHN
+- Energy *increases* vs P4 (activation quantization ops are additive in current model — pessimistic for real PoT-aware hardware that would exploit structured activations downstream)
+- Learnable sparsity *decreases* vs P4 (58.79% vs 64.67% C10; 74.97% vs 81.66% SVHN) — dual quantization disrupts threshold learning
+- Fixed50 beats learnable on SVHN accuracy (96.16% vs 96.02%) — only case in project history
+- **Phase 5 dominates Phase 6 on every metric** (higher accuracy, lower energy) under current energy model
 
 ---
 
@@ -99,5 +112,7 @@
 | 2 | DeepShift + PoT-BN | 0.0438 | 4.3× |
 | 3 | Sparse fixed 50% + std BN | 0.0238 | 7.9× |
 | 4 | Sparse fixed 50% + PoT-BN | 0.0230 | 8.2× |
-| 4 | **Sparse learnable + PoT-BN** | **0.0169** | **11.2×** |
+| 4 | Sparse learnable + PoT-BN | 0.0169 | 11.2× |
+| 5 | **Sparse learnable + PoT-BN + EWGS** | **0.0121** | **15.6×** |
+| 6 | Sparse learnable + PoT-BN + PoT-Act | 0.0194 | 9.7× (energy ↑, accuracy ↓1.5pp) |
 | 7 | **OmniShift v2 (learnable + EWGS + PoT act)** | **TBD** | **TBD** |
