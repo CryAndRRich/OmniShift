@@ -94,12 +94,24 @@
 
 ## Phase 7 — OmniShift v2 (EWGS + PoT Activations)
 
-*Base: Phase 5 + Phase 6 | Final model*
+*Base: Phase 5 + Phase 6 | Fully multiply-free end-to-end*
 
-| Config | CIFAR-10 | SVHN | Sparsity | Energy (GpJ) | vs P4 | vs ResNet-20 |
-|---|---|---|---|---|---|---|
-| omnishift_v2_fixed50 | TBD | TBD | ~50% | TBD | — | — |
-| omnishift_v2_learnable | TBD | TBD | TBD | TBD | — | — |
+| Config | CIFAR-10 | SVHN | Sparsity (C10 / SVHN) | Energy (GpJ) | vs ResNet-20 |
+|---|---|---|---|---|---|
+| omnishift_v2_fixed50 | **86.46%** | **96.20%** | 50.00% / 50.00% | **0.0230** | 8.2× |
+| omnishift_v2_learnable | **81.99%** | **95.38%** | 90.98% / 93.64% | **0.0060 / 0.0049** | **31.5× / 38.5×** |
+
+**Key findings:**
+- Learnable SVHN: **38.5× energy reduction** vs baseline (best in project) — sparsity 93.64%
+- Learnable CIFAR-10: **31.5× energy reduction** — but accuracy drops −9.1 pp vs P5 (91.09% → 81.99%)
+- SVHN accuracy drop acceptable: −1.01 pp vs P5 (96.39% → 95.38%)
+- Sparsity significantly higher than P5 (+14.74 pp CIFAR, +6.31 pp SVHN) — EWGS + PoT-Act amplify sparsity further
+- CIFAR-10 accuracy regression likely from dual quantization instability (EWGS + PoT-Act interact adversely on harder dataset)
+- Fixed50 unchanged from P4/P5 (correct — forward pass identical, only backward differs)
+
+**Hardware estimates (Kaggle T4, Xilinx Artix-7 model):**
+- FPGA: OmniShift interior conv stack → 0 DSP48E2 (all shifts are wired barrel-shifters)
+- TRT benchmark cells failed (--name arg bug) → fixed, re-run needed
 
 ---
 
@@ -113,6 +125,6 @@
 | 3 | Sparse fixed 50% + std BN | 0.0238 | 7.9× |
 | 4 | Sparse fixed 50% + PoT-BN | 0.0230 | 8.2× |
 | 4 | Sparse learnable + PoT-BN | 0.0169 | 11.2× |
-| 5 | **Sparse learnable + PoT-BN + EWGS** | **0.0121** | **15.6×** |
-| 6 | Sparse learnable + PoT-BN + PoT-Act | 0.0194 | 9.7× (energy ↑, accuracy ↓1.5pp) |
-| 7 | **OmniShift v2 (learnable + EWGS + PoT act)** | **TBD** | **TBD** |
+| 5 | Sparse learnable + PoT-BN + EWGS | 0.0121 | 15.6× |
+| 6 | Sparse learnable + PoT-BN + PoT-Act | 0.0194 | 9.7× (energy ↑ vs P4, acc ↓1.5pp) |
+| **7** | **OmniShift v2 learnable (EWGS + PoT-Act)** | **0.0060** | **31.5×** (acc ↓9.1pp vs P5) |

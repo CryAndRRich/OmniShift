@@ -1,22 +1,15 @@
 #!/usr/bin/env python3
 """TensorRT inference benchmark for OmniShift models.
 
-Exports a trained model to ONNX, builds a TensorRT FP16 engine,
+Exports trained model to ONNX, builds a TensorRT FP16 engine,
 and measures latency / throughput on the available GPU (e.g., Tesla T4).
-
-TensorRT validates deployment speed independently from the theoretical 45nm
-energy model. GPU execution does not replicate bit-shift hardware, but provides
-concrete latency numbers for edge deployment discussion.
-
-Fallback: if TensorRT is unavailable, runs a PyTorch FP32 baseline instead.
+Falls back to PyTorch FP32 if TensorRT is unavailable.
 
 Usage:
     cd OmniShift
-    python scripts/trt_benchmark.py --config configs/phase7_omnishift_v2.yaml \\
-                                    --name omnishift_v2_learnable --dataset cifar10
-    python scripts/trt_benchmark.py --config configs/phase7_omnishift_v2.yaml \\
-                                    --checkpoint checkpoints/phase7/omnishift_v2_learnable_cifar10_seed42.pt \\
-                                    --batch 64 --n-runs 1000
+    python scripts/trt_benchmark.py --config configs/omnishift.yaml --batch 1 --n-runs 1000
+    python scripts/trt_benchmark.py --config configs/omnishift.yaml --batch 64 --n-runs 500
+    python scripts/trt_benchmark.py --config configs/omnishift.yaml --checkpoint checkpoints/omnishift_cifar10_seed42.pt
 """
 
 import argparse
@@ -31,23 +24,10 @@ import yaml
 
 
 def _build_model(cfg, num_classes, in_channels):
-    mtype = cfg["model"]["type"]
-    name  = cfg["experiment"]["name"]
-    if mtype == "baseline":
-        from src.models.resnet20 import build_model
-    elif mtype == "potbn":
-        from src.models.resnet20_potbn import build_model
-    elif mtype == "full":
-        from src.models.resnet20_full import build_model
-    elif mtype == "ewgs":
-        from src.models.resnet20_ewgs import build_model
-    elif mtype == "pot_act":
-        from src.models.resnet20_pot_act import build_model
-    elif mtype == "omnishift_v2":
-        from src.models.resnet20_omnishift_v2 import build_model
-    else:
-        raise ValueError(f"Unknown model type: {mtype!r}")
-    return build_model(name, num_classes=num_classes, in_channels=in_channels)
+    from src.models.resnet_cifar import build_model
+    backbone = cfg["experiment"].get("backbone", "resnet20")
+    qcfg     = cfg.get("quantize", {})
+    return build_model(backbone, qcfg, num_classes=num_classes, in_channels=in_channels)
 
 
 def _warmup_sync(fn, n, device):
@@ -73,10 +53,8 @@ def pytorch_benchmark(model, dummy_input, n_warmup=100, n_runs=1000):
 
 
 def trt_benchmark(model, dummy_input, n_warmup=100, n_runs=1000):
-    """Build TensorRT FP16 engine and benchmark. Returns (lat_ms, ips) or None."""
     try:
         import tensorrt as trt
-        import numpy as np
     except ImportError:
         return None
 
@@ -85,8 +63,7 @@ def trt_benchmark(model, dummy_input, n_warmup=100, n_runs=1000):
     model.eval()
     with torch.no_grad():
         torch.onnx.export(
-            model, dummy_input, buf,
-            opset_version=13,
+            model, dummy_input, buf, opset_version=13,
             input_names=["input"], output_names=["output"],
             dynamic_axes={"input": {0: "batch"}, "output": {0: "batch"}},
         )
@@ -133,25 +110,27 @@ def trt_benchmark(model, dummy_input, n_warmup=100, n_runs=1000):
 def main():
     parser = argparse.ArgumentParser(description="TensorRT / PyTorch benchmark")
     parser.add_argument("--config",     required=True)
+    parser.add_argument("--name",       default=None, help="Override experiment.name")
     parser.add_argument("--dataset",    default=None)
-    parser.add_argument("--checkpoint", default=None, help=".pt checkpoint")
+    parser.add_argument("--checkpoint", default=None, help=".pt checkpoint path")
     parser.add_argument("--batch",      type=int, default=1)
     parser.add_argument("--n-runs",     type=int, default=1000)
     args = parser.parse_args()
 
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
+    if args.name:
+        cfg["experiment"]["name"] = args.name
 
     from src.data.loaders import get_dataloaders
     from src.utils.seed import set_seed
     from src.quantize.pot_bn import set_bn_epoch
 
-    dataset_name = args.dataset or cfg["experiment"]["dataset"]
-    seed = cfg["experiment"].get("seed", 42)
+    dataset_name = args.dataset or cfg["experiment"].get("dataset", "cifar10")
+    seed         = cfg["experiment"].get("seed", 42)
     seed_worker_fn, gen = set_seed(seed)
     data = get_dataloaders(dataset_name, batch_size=1, seed=seed,
-                           num_workers=0,
-                           seed_worker_fn=seed_worker_fn, generator=gen)
+                           num_workers=0, seed_worker_fn=seed_worker_fn, generator=gen)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model  = _build_model(cfg, data["num_classes"], data["channels"]).to(device)
@@ -160,18 +139,18 @@ def main():
 
     if args.checkpoint:
         ckpt  = torch.load(args.checkpoint, map_location=device)
-        state = ckpt.get("model_state", ckpt)
+        state = ckpt.get("state_dict", ckpt)
         model.load_state_dict(state, strict=False)
         print(f"Loaded: {args.checkpoint}")
 
     img_size = data["image_size"]
-    dummy    = torch.randn(args.batch, data["channels"], img_size, img_size,
-                           device=device)
+    dummy    = torch.randn(args.batch, data["channels"], img_size, img_size, device=device)
 
     gpu_name = torch.cuda.get_device_name(0) if device == "cuda" else "CPU"
+    backbone = cfg["experiment"].get("backbone", "resnet20")
     print(f"\n{'='*60}")
-    print(f"Model  : {cfg['experiment']['name']} | Dataset: {dataset_name}")
-    print(f"Device : {gpu_name} | Batch: {args.batch} | Runs: {args.n_runs}")
+    print(f"Backbone: {backbone} | Dataset: {dataset_name}")
+    print(f"Device  : {gpu_name} | Batch: {args.batch} | Runs: {args.n_runs}")
     print(f"{'='*60}")
 
     with torch.no_grad():

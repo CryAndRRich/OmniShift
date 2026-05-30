@@ -1,15 +1,15 @@
-"""Quantization primitives: shift, sparse-shift, and PoT-BN."""
+"""OmniShift quantization primitives and factory."""
 
-from .shift import RoundToPoT, ShiftConv2d
-from .sparse_shift import (
-    FixedSparseShiftQuantize,
-    LearnableSparseShiftQuantize,
-    SparseShiftConv2d,
-)
-from .pot_bn import ScaleToPoT, PoTBatchNorm2d, set_bn_epoch
+from .sparse_shift import SparseShiftConv2d
+from .pot_bn import PoTBatchNorm2d, set_bn_epoch
+from .pot_act import PoTActivation
+from .ewgs import SparseShiftConv2dEWGS, PoTBatchNorm2dEWGS, PoTActivationEWGS, EWGS_LAMBDA
+from .wrap import make_factories
 
 __all__ = [
-    "RoundToPoT", "ShiftConv2d",
-    "FixedSparseShiftQuantize", "LearnableSparseShiftQuantize", "SparseShiftConv2d",
-    "ScaleToPoT", "PoTBatchNorm2d", "set_bn_epoch",
+    "SparseShiftConv2d",
+    "PoTBatchNorm2d", "set_bn_epoch",
+    "PoTActivation",
+    "SparseShiftConv2dEWGS", "PoTBatchNorm2dEWGS", "PoTActivationEWGS", "EWGS_LAMBDA",
+    "make_factories",
 ]

@@ -1,30 +1,31 @@
-"""Unified ops counter for all OmniShift model variants.
+"""Backbone-agnostic ops counter using forward hooks.
 
 Energy model (45nm CMOS):
   mul   = 3.7 pJ
   add   = 0.9 pJ
   shift = 0.13 pJ  (~28× cheaper than mul)
 
-BN ops (folded form: y = scale * x + bias):
-  std BN  → 1 mul + 1 add per activation element
-  PoT-BN  → 1 shift + 1 add per activation element
-
-Sparse conv (skip-zero hardware):
-  shift+add counts are scaled by (1 - sparsity).
+Works with any backbone that uses standard nn.Conv2d / nn.BatchNorm2d /
+nn.Linear, or their OmniShift quantized counterparts.
 """
 
 from typing import Optional
 import torch
 import torch.nn as nn
 
-# Energy costs (pJ, 45nm CMOS)
 _MUL_PJ   = 3.7
 _ADD_PJ   = 0.9
 _SHIFT_PJ = 0.13
 
 
-def _conv_macs(c_in, c_out, kh, kw, h_out, w_out) -> int:
-    return c_in * c_out * kh * kw * h_out * w_out
+def _get_padding_stride(module):
+    pad = getattr(module, 'padding', 0)
+    stride = getattr(module, 'stride', 1)
+    if isinstance(pad, (list, tuple)):
+        pad = pad[0]
+    if isinstance(stride, (list, tuple)):
+        stride = stride[0]
+    return pad, stride
 
 
 def count_mul_add_shift(
@@ -32,152 +33,127 @@ def count_mul_add_shift(
     input_size: tuple = (1, 3, 32, 32),
     sparsity: Optional[float] = None,
 ) -> dict:
-    """Count mul / add / shift ops and compute energy for any OmniShift model.
+    """Count mul / add / shift ops via forward hooks. Works with any backbone.
 
-    Detects model type from layer attributes and module classes.
-    Returns dict with keys: mul, add, shift (absolute counts),
-    mul_G, add_G, shift_G (GigaOps), energy_pJ, energy_GpJ, sparsity.
+    Call set_bn_epoch(model, 999) before this function so PoT-BN reports
+    post-warmup behavior.
+
+    Returns dict: mul, add, shift (counts), mul_G, add_G, shift_G (GigaOps),
+                  energy_pJ, energy_GpJ, sparsity.
     """
     from src.quantize.sparse_shift import SparseShiftConv2d
-    from src.quantize.shift import ShiftConv2d
+    from src.quantize.ewgs import SparseShiftConv2dEWGS, PoTBatchNorm2dEWGS, PoTActivationEWGS
     from src.quantize.pot_bn import PoTBatchNorm2d
+    from src.quantize.pot_act import PoTActivation
 
-    # EWGS modules (same forward ops as their Phase 4 counterparts)
-    try:
-        from src.quantize.ewgs import SparseShiftConv2dEWGS, PoTBatchNorm2dEWGS
-        _sparse_types = (SparseShiftConv2d, SparseShiftConv2dEWGS)
-        _pot_bn_types = (PoTBatchNorm2d, PoTBatchNorm2dEWGS)
-    except ImportError:
-        _sparse_types = (SparseShiftConv2d,)
-        _pot_bn_types = (PoTBatchNorm2d,)
-
-    # PoT activation (Phase 6)
-    try:
-        from src.quantize.pot_act import PoTActivation
-        has_pot_act = any(isinstance(m, PoTActivation) for m in model.modules())
-    except ImportError:
-        has_pot_act = False
-
-    # Detect conv and BN types from first interior block
-    sample_conv = model.stage1[0].conv1
-    sample_bn = model.stage1[0].bn1
-
-    is_sparse = isinstance(sample_conv, _sparse_types)
-    is_shift  = isinstance(sample_conv, ShiftConv2d)
-    is_pot_bn = isinstance(sample_bn, _pot_bn_types)
-
-    # APoT / DenseShift only exist in Phase 1 models (src.models.resnet20)
-    try:
-        from src.models.resnet20 import APoTConv2d as _APoT, DenseShiftConv2d as _Dense
-        is_apot  = isinstance(sample_conv, _APoT)
-        is_dense = isinstance(sample_conv, _Dense)
-    except Exception:
-        is_apot = is_dense = False
+    _sparse_types   = (SparseShiftConv2d, SparseShiftConv2dEWGS)
+    _pot_bn_types   = (PoTBatchNorm2d, PoTBatchNorm2dEWGS)
+    _pot_act_types  = (PoTActivation, PoTActivationEWGS)
 
     # Resolve sparsity
-    if is_sparse:
-        if sparsity is None:
-            if hasattr(model, 'sparse_mode') and model.sparse_mode == "fixed":
-                sparsity = model.sparsity_ratio
-            else:
-                sparsity = model.get_global_sparsity()
-        nonzero_ratio = 1.0 - sparsity
-    else:
-        sparsity = 0.0
-        nonzero_ratio = 1.0
+    sparse_mods = [m for m in model.modules() if isinstance(m, _sparse_types)]
+    if sparse_mods and sparsity is None:
+        sparsity = sum(m.get_actual_sparsity() for m in sparse_mods) / len(sparse_mods)
+    sparsity = sparsity or 0.0
+    nonzero_ratio = 1.0 - sparsity
 
-    counts: dict = {"mul": 0, "add": 0, "shift": 0}
+    counts = {'mul': 0, 'add': 0, 'shift': 0}
+    hooks = []
 
-    def add_bn_ops(planes, h_o, w_o):
-        n = planes * h_o * w_o
-        if is_pot_bn:
-            counts["shift"] += n
-        else:
-            counts["mul"] += n
-        counts["add"] += n
+    def _conv_macs(mod, inp):
+        x = inp[0]
+        _, _, H_in, W_in = x.shape
+        C_out = mod.weight.shape[0]
+        C_in_k = mod.weight.shape[1]
+        kH, kW = mod.weight.shape[2], mod.weight.shape[3]
+        pad, stride = _get_padding_stride(mod)
+        H_out = (H_in + 2 * pad - kH) // stride + 1
+        W_out = (W_in + 2 * pad - kW) // stride + 1
+        return C_in_k * C_out * kH * kW * H_out * W_out
 
-    def add_interior_conv_ops(in_c, out_c, kh, kw, h_o, w_o):
-        """All interior convs (stage 1-3, including shortcuts)."""
-        m = _conv_macs(in_c, out_c, kh, kw, h_o, w_o)
-        if is_sparse:
-            counts["shift"] += int(m * nonzero_ratio)
-            counts["add"]   += int(m * nonzero_ratio)
-        elif is_shift:
-            counts["shift"] += m
-            counts["add"]   += m
-        elif is_apot:
-            K = getattr(sample_conv, 'K', 2)
-            counts["shift"] += K * m
-            counts["add"]   += m + (K - 1) * m
-        elif is_dense:
-            counts["shift"] += m
-            counts["add"]   += m
-        else:  # mul (vanilla Conv2d)
-            counts["mul"] += m
-            counts["add"] += m
+    # Sparse shift conv → shifts + adds (scaled by nonzero ratio)
+    for m in model.modules():
+        if isinstance(m, _sparse_types):
+            def sparse_hook(mod, inp, out, _nr=nonzero_ratio):
+                macs = _conv_macs(mod, inp)
+                counts['shift'] += int(macs * _nr)
+                counts['add']   += int(macs * _nr)
+            hooks.append(m.register_forward_hook(sparse_hook))
 
-    h, w = input_size[2], input_size[3]
-    H, W = h, w
+        elif isinstance(m, nn.Conv2d):
+            def conv_hook(mod, inp, out):
+                macs = _conv_macs(mod, inp)
+                counts['mul'] += macs
+                counts['add'] += macs
+            hooks.append(m.register_forward_hook(conv_hook))
 
-    # First conv: always nn.Conv2d (mul)
-    m = _conv_macs(input_size[1], 16, 3, 3, H, W)
-    counts["mul"] += m
-    counts["add"] += m
-    add_bn_ops(16, H, W)
+        elif isinstance(m, nn.Linear):
+            def linear_hook(mod, inp, out):
+                x = inp[0]
+                macs = x.shape[-1] * mod.out_features
+                counts['mul'] += macs
+                counts['add'] += macs
+            hooks.append(m.register_forward_hook(linear_hook))
 
-    in_planes = 16
-    for planes, num_blocks, stride in [(16, 3, 1), (32, 3, 2), (64, 3, 2)]:
-        strides = [stride] + [1] * (num_blocks - 1)
-        for s in strides:
-            H_out = H // s
-            W_out = W // s
+        elif isinstance(m, _pot_bn_types):
+            def pot_bn_hook(mod, inp, out):
+                x = inp[0]
+                n = x.shape[1] * x.shape[2] * x.shape[3]
+                if mod._should_use_pot():
+                    counts['shift'] += n
+                else:
+                    counts['mul'] += n
+                counts['add'] += n
+            hooks.append(m.register_forward_hook(pot_bn_hook))
 
-            add_interior_conv_ops(in_planes, planes, 3, 3, H_out, W_out)
-            add_bn_ops(planes, H_out, W_out)
-            add_interior_conv_ops(planes, planes, 3, 3, H_out, W_out)
-            add_bn_ops(planes, H_out, W_out)
+        elif isinstance(m, nn.BatchNorm2d):
+            def bn_hook(mod, inp, out):
+                x = inp[0]
+                n = x.shape[1] * x.shape[2] * x.shape[3]
+                counts['mul'] += n
+                counts['add'] += n
+            hooks.append(m.register_forward_hook(bn_hook))
 
-            if s != 1 or in_planes != planes:
-                add_interior_conv_ops(in_planes, planes, 1, 1, H_out, W_out)
-                add_bn_ops(planes, H_out, W_out)
+        elif isinstance(m, _pot_act_types):
+            def pot_act_hook(mod, inp, out):
+                x = inp[0]
+                if hasattr(mod, '_should_use_pot') and mod._should_use_pot():
+                    counts['shift'] += x.numel()
+            hooks.append(m.register_forward_hook(pot_act_hook))
 
-            in_planes = planes
-            H, W = H_out, W_out
+        elif isinstance(m, nn.AdaptiveAvgPool2d):
+            def avgpool_hook(mod, inp, out):
+                x = inp[0]
+                counts['add'] += x.shape[1] * x.shape[2] * x.shape[3]
+            hooks.append(m.register_forward_hook(avgpool_hook))
 
-    counts["add"] += in_planes * H * W  # AvgPool
+    # Single forward pass with dummy input
+    was_training = model.training
+    model.eval()
+    device = next(model.parameters()).device
+    dummy = torch.zeros(input_size, device=device)
+    with torch.no_grad():
+        model(dummy)
+    if was_training:
+        model.train()
 
-    # FC: always mul
-    num_classes = model.fc.out_features
-    counts["mul"] += in_planes * num_classes
-    counts["add"] += in_planes * num_classes
+    for h in hooks:
+        h.remove()
 
-    # PoT activation quantization overhead (Phase 6):
-    # Each PoTActivation element costs ~1 shift (log2-round to PoT grid).
-    if has_pot_act:
-        h_act, w_act = input_size[2], input_size[3]
-        counts["shift"] += 16 * h_act * w_act   # stem act
-        ah, aw = h_act, w_act
-        for planes_a, n_blocks_a, stride_a in [(16, 3, 1), (32, 3, 2), (64, 3, 2)]:
-            strides_a = [stride_a] + [1] * (n_blocks_a - 1)
-            for s_a in strides_a:
-                ah, aw = ah // s_a, aw // s_a
-                counts["shift"] += planes_a * ah * aw  # act1 (after conv1 relu)
-                counts["shift"] += planes_a * ah * aw  # act2 (block output relu)
-
-    energy_pj = (_MUL_PJ * counts["mul"]
-                 + _ADD_PJ * counts["add"]
-                 + _SHIFT_PJ * counts["shift"])
+    energy_pj = (_MUL_PJ * counts['mul']
+                 + _ADD_PJ * counts['add']
+                 + _SHIFT_PJ * counts['shift'])
 
     return {
-        "mul":        counts["mul"],
-        "add":        counts["add"],
-        "shift":      counts["shift"],
-        "mul_G":      counts["mul"]   / 1e9,
-        "add_G":      counts["add"]   / 1e9,
-        "shift_G":    counts["shift"] / 1e9,
-        "energy_pJ":  energy_pj,
-        "energy_GpJ": energy_pj / 1e9,
-        "sparsity":   sparsity,
+        'mul':        counts['mul'],
+        'add':        counts['add'],
+        'shift':      counts['shift'],
+        'mul_G':      counts['mul']   / 1e9,
+        'add_G':      counts['add']   / 1e9,
+        'shift_G':    counts['shift'] / 1e9,
+        'energy_pJ':  energy_pj,
+        'energy_GpJ': energy_pj / 1e9,
+        'sparsity':   sparsity,
     }
 
 
