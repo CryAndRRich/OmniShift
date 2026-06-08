@@ -1,39 +1,31 @@
-"""Dataset loading utilities for CIFAR-10, CIFAR-100, SVHN, STL-10, Tiny-ImageNet.
-
-Val split: 10% of training set, fixed seed=42 (consistent across all phases).
-"""
-
-from pathlib import Path
 from typing import Optional, Callable
 
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms, datasets
 
-
 DATASET_CONFIGS = {
     "cifar10": {
         "num_classes": 10, "image_size": 32, "channels": 3,
-        "mean": [0.4914, 0.4822, 0.4465], "std": [0.2470, 0.2435, 0.2616],
+        "mean": [0.4914, 0.4822, 0.4465], "std": [0.2470, 0.2435, 0.2616]
     },
     "svhn": {
         "num_classes": 10, "image_size": 32, "channels": 3,
-        "mean": [0.4377, 0.4438, 0.4728], "std": [0.1980, 0.2010, 0.1970],
+        "mean": [0.4377, 0.4438, 0.4728], "std": [0.1980, 0.2010, 0.1970]
     },
     "cifar100": {
         "num_classes": 100, "image_size": 32, "channels": 3,
-        "mean": [0.5071, 0.4865, 0.4409], "std": [0.2673, 0.2564, 0.2762],
+        "mean": [0.5071, 0.4865, 0.4409], "std": [0.2673, 0.2564, 0.2762]
     },
     "stl10": {
         "num_classes": 10, "image_size": 32, "channels": 3,
-        "mean": [0.4467, 0.4398, 0.4066], "std": [0.2603, 0.2566, 0.2713],
+        "mean": [0.4467, 0.4398, 0.4066], "std": [0.2603, 0.2566, 0.2713]
     },
     "tiny_imagenet": {
         "num_classes": 200, "image_size": 32, "channels": 3,
-        "mean": [0.4802, 0.4481, 0.3975], "std": [0.2770, 0.2691, 0.2821],
-    },
+        "mean": [0.4802, 0.4481, 0.3975], "std": [0.2770, 0.2691, 0.2821]
+    }
 }
-
 
 class _HFTinyImageNetDataset(Dataset):
     def __init__(self, hf_split, transform):
@@ -48,7 +40,6 @@ class _HFTinyImageNetDataset(Dataset):
         img = item["image"].convert("RGB")
         return self.transform(img), int(item["label"])
 
-
 def get_dataloaders(
     dataset: str,
     batch_size: int = 256,
@@ -58,12 +49,6 @@ def get_dataloaders(
     seed_worker_fn: Optional[Callable] = None,
     generator: Optional[torch.Generator] = None,
 ) -> dict:
-    """Return train/val/test DataLoaders with metadata.
-
-    Returns a dict with keys:
-        train_loader, val_loader, test_loader,
-        num_classes, image_size, channels, train_size, val_size, test_size
-    """
     if dataset not in DATASET_CONFIGS:
         raise ValueError(f"Unsupported dataset: {dataset!r}. "
                          f"Choose from {list(DATASET_CONFIGS)}.")
@@ -132,7 +117,7 @@ def get_dataloaders(
         num_workers=num_workers,
         pin_memory=True,
         worker_init_fn=seed_worker_fn,
-        persistent_workers=(num_workers > 0),
+        persistent_workers=(num_workers > 0)
     )
     if num_workers > 0:
         common["prefetch_factor"] = 2
@@ -151,5 +136,5 @@ def get_dataloaders(
         "channels": cfg["channels"],
         "train_size": len(train_set),
         "val_size": len(val_set),
-        "test_size": len(test_set),
+        "test_size": len(test_set)
     }

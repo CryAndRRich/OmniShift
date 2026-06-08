@@ -1,13 +1,3 @@
-#!/usr/bin/env python3
-"""Regenerate the Results section in README.md from logs/**/*.json.
-
-Called automatically by run_experiment.py after each run.
-
-Usage:
-    cd OmniShift
-    python scripts/update_readme.py [--log-root logs] [--readme README.md]
-"""
-
 import argparse
 import json
 import sys
@@ -17,8 +7,7 @@ from pathlib import Path
 START_MARKER = "<!-- RESULTS_TABLE_START -->"
 END_MARKER   = "<!-- RESULTS_TABLE_END -->"
 
-BASELINE_ENERGY = 0.1887  # ResNet-20 FP32, 45nm CMOS, GpJ
-
+BASELINE_ENERGY = 0.1887
 
 def load_results(log_root: Path) -> list[dict]:
     rows = []
@@ -27,35 +16,39 @@ def load_results(log_root: Path) -> list[dict]:
         try:
             data = json.loads(jf.read_text())
             meta = data.get("meta", data)
-            ops  = meta.get("final_ops") or {}
-            name    = meta.get("run_name") or meta.get("model_name", "?")
+            ops = meta.get("final_ops") or {}
+            name = meta.get("run_name") or meta.get("model_name", "?")
             backbone = meta.get("backbone", "?")
-            dataset  = meta.get("dataset_name", "?")
+            dataset = meta.get("dataset_name", "?")
             key = (name, dataset)
             if key in seen:
                 continue
             seen.add(key)
             rows.append({
-                "name":     name,
+                "name": name,
                 "backbone": backbone,
-                "dataset":  dataset,
+                "dataset": dataset,
                 "test_acc": meta.get("test_acc"),
                 "sparsity": meta.get("final_sparsity"),
-                "energy":   ops.get("energy_GpJ"),
+                "energy": ops.get("energy_GpJ"),
             })
         except Exception as e:
             print(f"[warn] {jf}: {e}", file=sys.stderr)
     return rows
 
+def _acc(v):  
+    return f"{v:.2%}" if v is not None else "?"
 
-def _acc(v):  return f"{v:.2%}" if v is not None else "?"
-def _sp(v):   return f"{v:.2%}" if v is not None else "—"
-def _eng(v):  return f"{v:.4f}" if v is not None else "?"
+def _sp(v):   
+    return f"{v:.2%}" if v is not None else "—"
+
+def _eng(v):  
+    return f"{v:.4f}" if v is not None else "?"
+
 def _ratio(energy):
     if energy is None or energy == 0:
         return "?"
-    return f"{BASELINE_ENERGY / energy:.1f}×"
-
+    return f"{BASELINE_ENERGY / energy:.1f}x"
 
 def build_table(rows: list[dict], dataset: str) -> str:
     ds_rows = sorted(
@@ -73,9 +66,8 @@ def build_table(rows: list[dict], dataset: str) -> str:
         )
     return "\n".join(lines)
 
-
 def generate_section(rows: list[dict]) -> str:
-    today    = date.today().isoformat()
+    today = date.today().isoformat()
     datasets = sorted({r["dataset"] for r in rows})
     parts = [f"Last updated: {today}\n"]
     for ds in datasets:
@@ -83,7 +75,6 @@ def generate_section(rows: list[dict]) -> str:
         parts.append(build_table(rows, ds))
         parts.append("")
     return "\n".join(parts)
-
 
 def update_readme(readme_path: Path, log_root: Path) -> None:
     text = readme_path.read_text()
@@ -93,23 +84,21 @@ def update_readme(readme_path: Path, log_root: Path) -> None:
 
     rows = load_results(log_root)
     if not rows:
-        print("No log files found — README left unchanged.")
+        print("No log files found - README left unchanged.")
         return
 
     new_section = generate_section(rows)
     before = text[:text.index(START_MARKER) + len(START_MARKER)]
     after  = text[text.index(END_MARKER):]
     readme_path.write_text(before + "\n" + new_section + after)
-    print(f"README updated ({len(rows)} run(s)) → {readme_path}")
-
+    print(f"README updated ({len(rows)} run(s)) -> {readme_path}")
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--log-root", default="logs")
-    parser.add_argument("--readme",   default="README.md")
+    parser.add_argument("--readme", default="README.md")
     args = parser.parse_args()
     update_readme(Path(args.readme), Path(args.log_root))
-
 
 if __name__ == "__main__":
     main()

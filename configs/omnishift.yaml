@@ -1,44 +1,20 @@
-# OmniShift — unified experiment config
-# Run: python scripts/run_experiment.py --config configs/omnishift.yaml [--dataset svhn] [--name my_run]
-
 experiment:
-  backbone: "resnet20"      # resnet20 | resnet32 | resnet56 | resnet110 | vgg11
-  dataset:  "cifar10"       # cifar10 | cifar100 | svhn | stl10 | tiny_imagenet
-  name:     "omnishift"     # used for checkpoint/log filenames
-  seed:     42
+  method: "omnishift"     # fp32 | deepshift | apot | xnor | denseshift | s3shift | fogzo | aptq | omnishift
+  backbone: "resnet20"    # resnet20 | resnet32 | resnet56 | resnet110 | vgg11
+  dataset: "cifar10"      # cifar10 | cifar100 | svhn | stl10 | tiny_imagenet
+  name: ""                # auto: "<method>_<backbone>"
+  seed: 42
 
-# ── OmniShift quantization toggles ──────────────────────────────────────────
-quantize:
-  # 1. Sparse shift weights: W ∈ {0, ±2^p}
-  use_sparse:     true
-  sparse_mode:    "learnable"   # "fixed" | "learnable"
-  sparsity_ratio: 0.5           # target sparsity for fixed mode
-
-  # 2. PoT Batch Normalization: γ/σ → ±2^q
-  use_pot_bn:  true
-  bn_warmup:   30               # epoch at which PoT-BN and PoT-Act activate
-
-  # 3. PoT Activation quantization: post-ReLU → {0} ∪ {2^p}
-  use_pot_act:    true
-  act_levels:     8             # number of non-zero PoT levels
-  act_alpha_init: 4.0           # initial clip value
-
-  # 4. EWGS gradient estimator (replaces STE)
-  use_ewgs:    true
-  ewgs_lambda: 0.02
-
-# ── Training hyperparameters ─────────────────────────────────────────────────
 training:
-  epochs:          200
-  batch_size:      256
-  lr:              0.1
-  momentum:        0.9
-  weight_decay:    0.0005
-  warmup_epochs:   0
-  clip_grad:       1.0
-  sparsity_lambda: 0.0001   # L1 regularization for learnable sparse mode
+  epochs: 200
+  batch_size: 256
+  lr: 0.1
+  momentum: 0.9
+  weight_decay: 0.0005
+  warmup_epochs: 0
+  clip_grad: 1.0
+  sparsity_lambda: 0.0001
 
-# ── Output paths ─────────────────────────────────────────────────────────────
 output:
   checkpoint_dir: "checkpoints"
-  log_dir:        "logs"
+  log_dir: "logs"

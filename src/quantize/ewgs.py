@@ -1,38 +1,21 @@
-"""EWGS (Element-Wise Gradient Scaling) quantizers for Phase 5.
-
-Replaces STE backward with:
-  g = g_STE ⊙ (1 + λ · sign(g_STE) ⊙ sign(w − Q(w)))
-
-λ=0.02 improves gradient flow near quantization boundaries without
-changing the forward pass — Phase 4 and Phase 5 have identical inference ops.
-
-Reference: Lee et al., "Network Quantization with Element-wise Gradient
-Scaling", CVPR 2021. https://arxiv.org/abs/2104.00903
-"""
-
 import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.autograd as autograd
 
 from src.quantize.pot_bn import PoTBatchNorm2d
 
 EWGS_LAMBDA = 0.02
 
-
-# ---------------------------------------------------------------------------
-# Autograd functions
-# ---------------------------------------------------------------------------
-
-class RoundToPoTEWGS(torch.autograd.Function):
-    """Round weight to nearest signed PoT with EWGS backward."""
-
+class RoundToPoTEWGS(autograd.Function):
     @staticmethod
     def forward(ctx, w, ewgs_lambda):
         sign = torch.sign(w)
         sign = torch.where(sign == 0, torch.ones_like(sign), sign)
         abs_w = w.abs().clamp(min=1e-8)
         p = torch.round(torch.log2(abs_w))
+        p = p.clamp(-15, 0)
         w_pot = sign * (2.0 ** p)
         ctx.save_for_backward(w, w_pot)
         ctx.ewgs_lambda = ewgs_lambda
@@ -45,10 +28,7 @@ class RoundToPoTEWGS(torch.autograd.Function):
         grad = grad_output * (1.0 + lam * grad_output.sign() * (w - w_pot).sign())
         return grad, None
 
-
-class ScaleToPoTEWGS(torch.autograd.Function):
-    """Round BN scale to nearest signed PoT (p clamped ±15) with EWGS backward."""
-
+class ScaleToPoTEWGS(autograd.Function):
     @staticmethod
     def forward(ctx, scale, ewgs_lambda):
         sign = torch.sign(scale)
@@ -68,10 +48,7 @@ class ScaleToPoTEWGS(torch.autograd.Function):
         grad = grad_output * (1.0 + lam * grad_output.sign() * (scale - s_pot).sign())
         return grad, None
 
-
-class FixedSparseShiftEWGS(torch.autograd.Function):
-    """W ∈ {0, ±2^p} with fixed sparsity ratio — EWGS backward."""
-
+class FixedSparseShiftEWGS(autograd.Function):
     @staticmethod
     def forward(ctx, w, sparsity_ratio, ewgs_lambda):
         abs_w = w.abs()
@@ -89,6 +66,7 @@ class FixedSparseShiftEWGS(torch.autograd.Function):
         sign = torch.sign(w)
         sign = torch.where(sign == 0, torch.ones_like(sign), sign)
         p = torch.round(torch.log2(abs_w.clamp(min=1e-8)))
+        p = p.clamp(-15, 0)
         w_pot = sign * (2.0 ** p)
         w_q = mask * w_pot
 
@@ -103,10 +81,7 @@ class FixedSparseShiftEWGS(torch.autograd.Function):
         grad = grad_output * (1.0 + lam * grad_output.sign() * (w - w_q).sign())
         return grad, None, None
 
-
-class LearnableSparseShiftEWGS(torch.autograd.Function):
-    """W ∈ {0, ±2^p} with learnable threshold — EWGS backward."""
-
+class LearnableSparseShiftEWGS(autograd.Function):
     @staticmethod
     def forward(ctx, w, threshold, ewgs_lambda):
         abs_w = w.abs()
@@ -115,6 +90,7 @@ class LearnableSparseShiftEWGS(torch.autograd.Function):
         sign = torch.sign(w)
         sign = torch.where(sign == 0, torch.ones_like(sign), sign)
         p = torch.round(torch.log2(abs_w.clamp(min=1e-8)))
+        p = p.clamp(-15, 0)
         w_pot = sign * (2.0 ** p)
         w_q = mask * w_pot
 
@@ -129,18 +105,7 @@ class LearnableSparseShiftEWGS(torch.autograd.Function):
         grad = grad_output * (1.0 + lam * grad_output.sign() * (w - w_q).sign())
         return grad, None, None
 
-
-# ---------------------------------------------------------------------------
-# Module wrappers
-# ---------------------------------------------------------------------------
-
 class SparseShiftConv2dEWGS(nn.Module):
-    """SparseShiftConv2d with EWGS backward — identical forward to SparseShiftConv2d.
-
-    Drop-in replacement: forward pass and inference energy are unchanged from
-    Phase 4; only the gradient estimator is replaced (STE → EWGS).
-    """
-
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1,
                  padding=1, bias=False, sparse_mode="fixed",
                  sparsity_ratio=0.5, init_threshold=0.05,
@@ -161,10 +126,11 @@ class SparseShiftConv2dEWGS(nn.Module):
         self.bias = nn.Parameter(torch.empty(out_channels)) if bias else None
 
         if sparse_mode == "learnable":
-            self.log_threshold = nn.Parameter(
-                torch.tensor(math.log(init_threshold)))
 
-        nn.init.kaiming_normal_(self.weight, mode='fan_out', nonlinearity='relu')
+            self.register_buffer('log_threshold',
+                                  torch.tensor(math.log(init_threshold)))
+
+        nn.init.kaiming_normal_(self.weight, mode="fan_out", nonlinearity="relu")
         if self.bias is not None:
             nn.init.zeros_(self.bias)
 
@@ -194,22 +160,15 @@ class SparseShiftConv2dEWGS(nn.Module):
         return (w_q == 0).float().mean().item()
 
     def extra_repr(self):
-        s = (f'{self.in_channels}, {self.out_channels}, '
-             f'kernel_size={self.kernel_size}, stride={self.stride}, '
-             f'padding={self.padding}, sparse_mode={self.sparse_mode}, '
-             f'ewgs_lambda={self.ewgs_lambda}')
+        s = (f"{self.in_channels}, {self.out_channels}, "
+             f"kernel_size={self.kernel_size}, stride={self.stride}, "
+             f"padding={self.padding}, sparse_mode={self.sparse_mode}, "
+             f"ewgs_lambda={self.ewgs_lambda}")
         if self.sparse_mode == "fixed":
-            s += f', sparsity_ratio={self.sparsity_ratio}'
+            s += f", sparsity_ratio={self.sparsity_ratio}"
         return s
 
-
-class RoundActivToPoTEWGS(torch.autograd.Function):
-    """PoT activation quantizer with EWGS backward.
-
-    Forward identical to RoundActivToPoT. Backward applies EWGS scaling
-    to smooth training near the PoT quantization boundaries.
-    """
-
+class RoundActivToPoTEWGS(autograd.Function):
     @staticmethod
     def forward(ctx, x, log_alpha, n_levels, ewgs_lambda):
         alpha = log_alpha.exp()
@@ -237,13 +196,7 @@ class RoundActivToPoTEWGS(torch.autograd.Function):
         grad_log_alpha = (grad_output * at_clip * alpha).sum().reshape(log_alpha.shape)
         return grad_x, grad_log_alpha, None, None
 
-
 class PoTActivationEWGS(nn.Module):
-    """PoTActivation with EWGS backward for smoother PoT grid training.
-
-    Drop-in replacement for PoTActivation — identical forward, EWGS backward.
-    """
-
     def __init__(self, n_levels: int = 8, alpha_init: float = 4.0,
                  use_pot_after_epoch: int = 0,
                  ewgs_lambda: float = EWGS_LAMBDA):
@@ -265,14 +218,11 @@ class PoTActivationEWGS(nn.Module):
             x, self.log_alpha, self.n_levels, self.ewgs_lambda)
 
     def extra_repr(self) -> str:
-        return (f'n_levels={self.n_levels}, '
-                f'use_pot_after_epoch={self.use_pot_after_epoch}, '
-                f'ewgs_lambda={self.ewgs_lambda}')
-
+        return (f"n_levels={self.n_levels}, "
+                f"use_pot_after_epoch={self.use_pot_after_epoch}, "
+                f"ewgs_lambda={self.ewgs_lambda}")
 
 class PoTBatchNorm2dEWGS(PoTBatchNorm2d):
-    """PoTBatchNorm2d with EWGS backward for the ScaleToPoT quantization step."""
-
     def __init__(self, num_features, momentum=0.1, eps=1e-5,
                  use_pot_after_epoch=0, ewgs_lambda: float = EWGS_LAMBDA):
         super().__init__(num_features, momentum=momentum, eps=eps,

@@ -1,9 +1,6 @@
-"""Learning rate schedule: cosine decay with optional linear warmup."""
-
 import math
 from torch.optim.lr_scheduler import LambdaLR
 from torch.optim import Optimizer
-
 
 def cosine_lr_schedule(
     optimizer: Optimizer,
@@ -11,7 +8,6 @@ def cosine_lr_schedule(
     steps_per_epoch: int,
     warmup_epochs: int = 0,
 ) -> LambdaLR:
-    """Cosine decay scheduler with linear warmup, step-level granularity."""
     warmup_steps = warmup_epochs * steps_per_epoch
     total_steps = total_epochs * steps_per_epoch
 

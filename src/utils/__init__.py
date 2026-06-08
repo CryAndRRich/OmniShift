@@ -1,5 +1,3 @@
-"""Utility functions: ops counting, seeding, checkpointing."""
-
 from .ops_counter import count_mul_add_shift, count_params
 from .seed import set_seed, clear_memory
 from .checkpoint import save_checkpoint, load_checkpoint

@@ -1,10 +1,7 @@
-"""Core training loop: train_one_epoch, evaluate, EarlyStopping."""
-
 import torch
 import torch.nn as nn
 
 from .regularize import compute_sparsity_reg
-
 
 def train_one_epoch(
     model: nn.Module,
@@ -16,11 +13,6 @@ def train_one_epoch(
     clip_grad: float = 0.0,
     sparsity_lambda: float = 0.0,
 ) -> tuple[float, float]:
-    """Train for one epoch. Returns (avg_loss, accuracy).
-
-    Call set_bn_epoch(model, epoch) BEFORE this function for PoT-BN warmup.
-    AMP is enabled when scaler is not None.
-    """
     model.train()
     crit = nn.CrossEntropyLoss()
     loss_sum = correct = total = 0
@@ -61,7 +53,6 @@ def train_one_epoch(
 
     return loss_sum / total, correct / total
 
-
 @torch.no_grad()
 def evaluate(
     model: nn.Module,
@@ -69,7 +60,6 @@ def evaluate(
     device,
     use_amp: bool = False,
 ) -> tuple[float, float]:
-    """Evaluate model on loader. Returns (avg_loss, accuracy)."""
     model.eval()
     crit = nn.CrossEntropyLoss()
     loss_sum = correct = total = 0
@@ -90,10 +80,7 @@ def evaluate(
 
     return loss_sum / total, correct / total
 
-
 class EarlyStopping:
-    """Stops training when val accuracy stops improving."""
-
     def __init__(self, patience: int = 25, min_delta: float = 1e-4,
                  min_epochs: int = 50):
         self.patience = patience

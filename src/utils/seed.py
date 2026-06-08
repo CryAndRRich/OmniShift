@@ -1,5 +1,3 @@
-"""Reproducibility helpers: set_seed, clear_memory."""
-
 import gc
 import os
 import random
@@ -10,9 +8,7 @@ from typing import Callable, Tuple
 import numpy as np
 import torch
 
-
 def set_seed(seed: int) -> Tuple[Callable, torch.Generator]:
-    """Configure all RNGs for reproducibility. Returns (seed_worker_fn, generator)."""
     os.environ["PYTHONHASHSEED"] = str(seed)
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     warnings.filterwarnings("ignore")
@@ -32,9 +28,7 @@ def set_seed(seed: int) -> Tuple[Callable, torch.Generator]:
     g.manual_seed(seed)
     return seed_worker, g
 
-
 def clear_memory() -> None:
-    """Release GPU and CPU memory caches."""
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
