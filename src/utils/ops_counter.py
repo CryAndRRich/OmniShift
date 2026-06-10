@@ -23,20 +23,16 @@ def count_mul_add_shift(
     from src.quantize.sparse_shift import SparseShiftConv2d
     from src.quantize.s3shift import S3ShiftConv2d
     from src.quantize.aptq_ternary import APTQTernaryConv2d
-    from src.quantize.ewgs import (SparseShiftConv2dEWGS,
-                                              PoTBatchNorm2dEWGS,
-                                              PoTActivationEWGS)
+    from src.quantize.ewgs import (SparseShiftConv2dEWGS, PoTBatchNorm2dEWGS, PoTActivationEWGS)
     from src.quantize.pot_bn import PoTBatchNorm2d
     from src.quantize.pot_act import PoTActivation
     from src.quantize.shift import ShiftConv2d
     from src.quantize.fogzo import FogzoShiftConv2d
     from src.quantize.apot import APoTConv2d
-    from src.quantize.xnor import XNORConv2d
     from src.quantize.denseshift import DenseShiftConv2d
 
     _sparse_types = (SparseShiftConv2d, SparseShiftConv2dEWGS, S3ShiftConv2d, APTQTernaryConv2d)
     _dense_shift_types = (ShiftConv2d, FogzoShiftConv2d, APoTConv2d, DenseShiftConv2d)
-    _binary_types = (XNORConv2d,)
     _pot_bn_types = (PoTBatchNorm2d, PoTBatchNorm2dEWGS)
     _pot_act_types = (PoTActivation, PoTActivationEWGS)
 
@@ -83,12 +79,6 @@ def count_mul_add_shift(
                 counts["shift"] += macs
                 counts["add"] += macs
             hooks.append(m.register_forward_hook(dense_shift_hook))
-
-        elif isinstance(m, _binary_types):
-            def binary_hook(mod, inp, out):
-                macs = _conv_macs(mod, inp)
-                counts["add"] += macs
-            hooks.append(m.register_forward_hook(binary_hook))
 
         elif isinstance(m, nn.Conv2d):
             def conv_hook(mod, inp, out):

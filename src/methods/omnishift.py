@@ -1,5 +1,3 @@
-import torch.nn as nn
-
 def make_factories(sparse_mode='learnable', sparsity_ratio=0.5, bn_warmup=30,
                    act_levels=8, act_alpha_init=4.0, ewgs_lambda=0.02, **opts):
     from src.quantize.ewgs import (SparseShiftConv2dEWGS,

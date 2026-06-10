@@ -36,7 +36,6 @@ class ResNetCIFAR(nn.Module):
 
     STAGE_CONFIGS = {
         "resnet20": [3, 3, 3],
-        "resnet32": [5, 5, 5],
         "resnet56": [9, 9, 9],
         "resnet110": [18, 18, 18]
     }
@@ -92,52 +91,7 @@ class ResNetCIFAR(nn.Module):
         mods = [m for m in self.modules() if isinstance(m, _SPARSE_TYPES)]
         return sum(m.get_actual_sparsity() for m in mods) / len(mods) if mods else 0.0
 
-class VGG_CIFAR(nn.Module):
-
-    _CFG = [64, "M", 128, "M", 256, 256, "M", 512, 512, "M"]
-
-    def __init__(self, make_conv, make_bn, make_act, num_classes=10, in_channels=3):
-        super().__init__()
-        layers = []
-        in_c = in_channels
-        first = True
-        for v in self._CFG:
-            if v == "M":
-                layers.append(nn.MaxPool2d(2, 2))
-            else:
-                conv = (nn.Conv2d(in_c, v, 3, 1, 1, bias=False)
-                        if first else make_conv(in_c, v, 3, 1, 1))
-                first = False
-                layers += [conv, make_bn(v), nn.ReLU(inplace=False), make_act()]
-                in_c = v
-
-        self.features = nn.Sequential(*layers)
-        self.avgpool = nn.AdaptiveAvgPool2d(1)
-        self.fc = nn.Linear(512, num_classes)
-        self._init_weights()
-
-    def _init_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
-            elif isinstance(m, nn.BatchNorm2d):
-                nn.init.ones_(m.weight)
-                nn.init.zeros_(m.bias)
-            elif isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, 0, 0.01)
-                nn.init.zeros_(m.bias)
-
-    def forward(self, x):
-        out = self.features(x)
-        out = self.avgpool(out).flatten(1)
-        return self.fc(out)
-
-    @torch.no_grad()
-    def get_global_sparsity(self) -> float:
-        mods = [m for m in self.modules() if isinstance(m, _SPARSE_TYPES)]
-        return sum(m.get_actual_sparsity() for m in mods) / len(mods) if mods else 0.0
-
-SUPPORTED_BACKBONES = list(ResNetCIFAR.STAGE_CONFIGS) + ["vgg11"]
+SUPPORTED_BACKBONES = list(ResNetCIFAR.STAGE_CONFIGS)
 
 def build_model(backbone: str, method: str,
                 num_classes: int, in_channels: int = 3, **method_opts) -> nn.Module:
@@ -148,9 +102,6 @@ def build_model(backbone: str, method: str,
         blocks = ResNetCIFAR.STAGE_CONFIGS[backbone]
         return ResNetCIFAR(blocks, make_conv, make_bn, make_act,
                            num_classes=num_classes, in_channels=in_channels)
-    elif backbone == "vgg11":
-        return VGG_CIFAR(make_conv, make_bn, make_act,
-                         num_classes=num_classes, in_channels=in_channels)
     else:
         raise ValueError(
             f"Unknown backbone: {backbone!r}. Supported: {SUPPORTED_BACKBONES}"

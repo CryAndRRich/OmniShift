@@ -1,7 +1,6 @@
 from .fp32 import make_factories as _fp32
 from .deepshift import make_factories as _deepshift
 from .apot import make_factories as _apot
-from .xnor import make_factories as _xnor
 from .denseshift import make_factories as _denseshift
 from .s3shift import make_factories as _s3shift
 from .fogzo import make_factories as _fogzo
@@ -12,7 +11,6 @@ _REGISTRY = {
     "fp32": _fp32,
     "deepshift": _deepshift,
     "apot": _apot,
-    "xnor": _xnor,
     "denseshift": _denseshift,
     "s3shift": _s3shift,
     "fogzo": _fogzo,

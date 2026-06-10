@@ -21,7 +21,6 @@ _DEFAULT_SPARSITY_LAMBDA = {
     "fp32": 0.0,
     "deepshift": 0.0,
     "apot": 0.0,
-    "xnor": 0.0,
     "denseshift": 0.0,
     "s3shift": 1e-4,
     "fogzo": 0.0,
@@ -218,9 +217,9 @@ def main():
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
 
-    if args.method:  
+    if args.method:
         cfg["experiment"]["method"] = args.method
-    if args.name:    
+    if args.name:
         cfg["experiment"]["name"] = args.name
 
     result = run(cfg, dataset_override=args.dataset)

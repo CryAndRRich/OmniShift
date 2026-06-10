@@ -20,19 +20,6 @@ OmniShift is a **framework**, not a model. It converts any supported CNN backbon
 
 ---
 
-## Key Results (ResNet-20, all 4 components ON)
-
-| Dataset | Test Acc | Sparsity | Energy (GpJ) | vs ResNet-20 FP32 |
-|---------|:--------:|:--------:|:------------:|:-----------------:|
-| CIFAR-10 (learnable) | 81.99% | 90.98% | 0.0060 | **31.5×** |
-| CIFAR-10 (fixed 50%) | 86.46% | 50.00% | 0.0230 | 8.2× |
-| SVHN (learnable) | 95.38% | 93.64% | 0.0049 | **38.5×** |
-| SVHN (fixed 50%) | 96.20% | 50.00% | 0.0230 | 8.2× |
-
-ResNet-20 FP32 baseline: 92.23% CIFAR-10 / 96.49% SVHN / 0.1887 GpJ
-
----
-
 ## Quick Start
 
 ```bash
@@ -47,7 +34,7 @@ from src.utils.ops_counter import count_mul_add_shift
 from src.quantize.pot_bn import set_bn_epoch
 import torch
 
-for method in ['fp32', 'deepshift', 'apot', 'xnor', 'denseshift', 's3shift', 'fogzo', 'aptq', 'omnishift']:
+for method in ['fp32', 'deepshift', 'apot', 'denseshift', 's3shift', 'fogzo', 'aptq', 'omnishift']:
     m = build_model('resnet20', method, num_classes=10)
     set_bn_epoch(m, 999)
     out = m(torch.randn(2, 3, 32, 32))
@@ -69,12 +56,10 @@ python scripts/summarize_results.py
 
 **Backbones:**
 - `resnet20` — ResNet-20 (3×[3,3,3] blocks, 16/32/64 channels)
-- `resnet32` — ResNet-32 (3×[5,5,5] blocks)
 - `resnet56` — ResNet-56 (3×[9,9,9] blocks)
 - `resnet110` — ResNet-110 (3×[18,18,18] blocks)
-- `vgg11` — VGG-11 adapted for 32×32 input
 
-**Datasets:** `cifar10`, `cifar100`, `svhn`, `stl10`, `tiny_imagenet`
+**Datasets:** `cifar10`, `svhn`, `stl10`
 
 ---
 
@@ -85,14 +70,13 @@ python scripts/summarize_results.py
 | `fp32` | — | — | — | — |
 | `deepshift` | DeepShift: Towards Multiplication-Less Neural Networks | Elhoushi et al. | [1905.13298](https://arxiv.org/abs/1905.13298) | CVPR-W 2021 |
 | `apot` | Additive Power-of-Two Quantization | Li et al. | [1909.13144](https://arxiv.org/abs/1909.13144) | ICLR 2020 |
-| `xnor` | XNOR-Net: ImageNet Classification Using Binary Convolutional Neural Networks | Rastegari et al. | [1603.05279](https://arxiv.org/abs/1603.05279) | ECCV 2016 |
 | `denseshift` | DenseShift: Towards Accurate and Efficient Low-Bit Power-of-Two Quantization | Li et al. | [2208.09708](https://arxiv.org/abs/2208.09708) | ICCV 2023 |
 | `s3shift` | S³: Sign-Sparse-Shift Reparametrization for Effective Training of Low-Bit Shift Networks | Li et al. | [2107.03453](https://arxiv.org/abs/2107.03453) | NeurIPS 2021 |
 | `fogzo` | FOGZO: First-Order-Guided Zeroth-Order Gradient Descent for Quantization-Aware Training | Yang & Aamodt | [2510.23926](https://arxiv.org/abs/2510.23926) | NeurIPS 2025 |
 | `aptq` | APTQ: Adaptive Global Power-of-Two Ternary Quantization | Liu et al. | — | Sensors (MDPI) 2024 |
 | `omnishift` | OmniShift (this work) | — | — | — |
 
-> `apot` implements the correct additive PoT grid (δ = α/2^(n_bits−1) step, uniformly-spaced levels). `xnor` implements full XNOR-Net (weight + activation binarization). `aptq` has no public arXiv preprint; DOI: 10.3390/s24010181.
+> `apot` implements the correct additive PoT grid (δ = α/2^(n_bits−1) step, uniformly-spaced levels). `aptq` has no public arXiv preprint; DOI: 10.3390/s24010181.
 
 ---
 
@@ -108,7 +92,6 @@ OmniShift/
 │   │   ├── fogzo.py           # FogzoShiftConv2d — ZO-augmented STE
 │   │   ├── aptq_ternary.py    # APTQTernaryConv2d — two-sub-filter PoT ternary
 │   │   ├── apot.py            # APoTConv2d — additive PoT grid
-│   │   ├── xnor.py            # XNORConv2d — binary weights + activations
 │   │   ├── denseshift.py      # DenseShiftConv2d — sign×shift, no zero
 │   │   ├── pot_bn.py          # PoTBatchNorm2d, set_bn_epoch
 │   │   ├── pot_act.py         # PoTActivation
@@ -118,7 +101,6 @@ OmniShift/
 │   │   ├── fp32.py            # FP32 baseline
 │   │   ├── deepshift.py       # DeepShift-PS
 │   │   ├── apot.py            # APoT
-│   │   ├── xnor.py            # XNOR-Net / BWN
 │   │   ├── denseshift.py      # DenseShift
 │   │   ├── s3shift.py         # S³
 │   │   ├── fogzo.py           # FOGZO
@@ -156,9 +138,9 @@ Edit `configs/omnishift.yaml` or pass `--method`/`--dataset` flags:
 
 ```yaml
 experiment:
-  method:   "omnishift"   # fp32 | deepshift | apot | xnor | denseshift | s3shift | fogzo | aptq | omnishift
-  backbone: "resnet20"    # resnet20 | resnet32 | resnet56 | resnet110 | vgg11
-  dataset:  "cifar10"     # cifar10 | cifar100 | svhn | stl10 | tiny_imagenet
+  method:   "omnishift"   # fp32 | deepshift | apot | denseshift | s3shift | fogzo | aptq | omnishift
+  backbone: "resnet20"    # resnet20 | resnet56 | resnet110
+  dataset:  "cifar10"     # cifar10 | svhn | stl10
   seed:     42
 
 training:
@@ -194,10 +176,46 @@ logs/{run_name}_{dataset}_seed{seed}.json        # per-epoch loss/acc log
 ## Results
 
 <!-- RESULTS_TABLE_START -->
-Last updated: 2026-05-30
+Last updated: 2026-06-10
 
-*Run `python scripts/summarize_results.py` to see results from your own runs.*
-*Run `python scripts/update_readme.py` to auto-populate this section from logs/.*
+### CIFAR-10
+
+| Method | Test Acc | Sparsity | Energy (GpJ) | vs FP32 |
+|--------|:--------:|:--------:|:------------:|:-------:|
+| omnishift_resnet20 | 83.01% | 89.03% | 0.0068 | **27.6×** |
+| aptq_resnet20 | 91.35% | 74.90% | 0.0134 | **14.1×** |
+| apot_resnet20 | 91.27% | 0.00% | 0.0446 | 4.2× |
+| deepshift_resnet20 | 92.23% | 0.00% | 0.0446 | 4.2× |
+| denseshift_resnet20 | 90.56% | 0.00% | 0.0446 | 4.2× |
+| fogzo_resnet20 | 90.72% | 0.00% | 0.0446 | 4.2× |
+| s3shift_resnet20 | 90.58% | 0.00% | 0.0446 | 4.2× |
+| fp32_resnet20 (baseline) | 92.17% | 0.00% | 0.1887 | 1.0× |
+
+### SVHN
+
+| Method | Test Acc | Sparsity | Energy (GpJ) | vs FP32 |
+|--------|:--------:|:--------:|:------------:|:-------:|
+| omnishift_resnet20 | 94.78% | 93.43% | 0.0050 | **37.7×** |
+| aptq_resnet20 | 96.50% | 84.61% | 0.0094 | **20.1×** |
+| apot_resnet20 | 96.54% | 0.00% | 0.0446 | 4.2× |
+| deepshift_resnet20 | 96.73% | 0.00% | 0.0446 | 4.2× |
+| denseshift_resnet20 | 96.47% | 0.00% | 0.0446 | 4.2× |
+| fogzo_resnet20 | 95.98% | 0.00% | 0.0446 | 4.2× |
+| s3shift_resnet20 | 96.36% | 0.00% | 0.0446 | 4.2× |
+| fp32_resnet20 (baseline) | 96.82% | 0.00% | 0.1887 | 1.0× |
+
+### STL-10
+
+| Method | Test Acc | Sparsity | Energy (GpJ) | vs FP32 |
+|--------|:--------:|:--------:|:------------:|:-------:|
+| omnishift_resnet20 | 65.93% | 64.29% | 0.0171 | **11.0×** |
+| aptq_resnet20 | 65.50% | 51.17% | 0.0233 | **8.1×** |
+| apot_resnet20 | 66.87% | 0.00% | 0.0446 | 4.2× |
+| deepshift_resnet20 | 67.54% | 0.00% | 0.0446 | 4.2× |
+| denseshift_resnet20 | 68.46% | 0.00% | 0.0446 | 4.2× |
+| fogzo_resnet20 | 59.03% | 0.00% | 0.0446 | 4.2× |
+| s3shift_resnet20 | 68.11% | 0.00% | 0.0446 | 4.2× |
+| fp32_resnet20 (baseline) | 67.63% | 0.00% | 0.1887 | 1.0× |
 <!-- RESULTS_TABLE_END -->
 
 ---

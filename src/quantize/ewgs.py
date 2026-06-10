@@ -126,7 +126,6 @@ class SparseShiftConv2dEWGS(nn.Module):
         self.bias = nn.Parameter(torch.empty(out_channels)) if bias else None
 
         if sparse_mode == "learnable":
-
             self.register_buffer('log_threshold',
                                   torch.tensor(math.log(init_threshold)))
 

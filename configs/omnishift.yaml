@@ -1,7 +1,7 @@
 experiment:
-  method: "omnishift"     # fp32 | deepshift | apot | xnor | denseshift | s3shift | fogzo | aptq | omnishift
-  backbone: "resnet20"    # resnet20 | resnet32 | resnet56 | resnet110 | vgg11
-  dataset: "cifar10"      # cifar10 | cifar100 | svhn | stl10 | tiny_imagenet
+  method: "omnishift"     # fp32 | deepshift | apot | denseshift | s3shift | fogzo | aptq | omnishift
+  backbone: "resnet20"    # resnet20 | resnet56 | resnet110
+  dataset: "cifar10"      # cifar10 | svhn | stl10
   name: ""                # auto: "<method>_<backbone>"
   seed: 42
 

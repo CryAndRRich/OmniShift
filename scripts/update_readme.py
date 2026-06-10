@@ -36,13 +36,13 @@ def load_results(log_root: Path) -> list[dict]:
             print(f"[warn] {jf}: {e}", file=sys.stderr)
     return rows
 
-def _acc(v):  
+def _acc(v):
     return f"{v:.2%}" if v is not None else "?"
 
-def _sp(v):   
+def _sp(v):
     return f"{v:.2%}" if v is not None else "—"
 
-def _eng(v):  
+def _eng(v):
     return f"{v:.4f}" if v is not None else "?"
 
 def _ratio(energy):

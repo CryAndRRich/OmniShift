@@ -4,7 +4,6 @@ from .pot_act import PoTActivation
 from .ewgs import SparseShiftConv2dEWGS, PoTBatchNorm2dEWGS, PoTActivationEWGS, EWGS_LAMBDA
 from .shift import ShiftConv2d
 from .apot import APoTConv2d
-from .xnor import XNORConv2d
 from .denseshift import DenseShiftConv2d
 
 __all__ = [
@@ -14,6 +13,5 @@ __all__ = [
     "SparseShiftConv2dEWGS", "PoTBatchNorm2dEWGS", "PoTActivationEWGS", "EWGS_LAMBDA",
     "ShiftConv2d",
     "APoTConv2d",
-    "XNORConv2d",
     "DenseShiftConv2d",
 ]

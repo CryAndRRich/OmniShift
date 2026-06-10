@@ -13,32 +13,11 @@ DATASET_CONFIGS = {
         "num_classes": 10, "image_size": 32, "channels": 3,
         "mean": [0.4377, 0.4438, 0.4728], "std": [0.1980, 0.2010, 0.1970]
     },
-    "cifar100": {
-        "num_classes": 100, "image_size": 32, "channels": 3,
-        "mean": [0.5071, 0.4865, 0.4409], "std": [0.2673, 0.2564, 0.2762]
-    },
     "stl10": {
         "num_classes": 10, "image_size": 32, "channels": 3,
         "mean": [0.4467, 0.4398, 0.4066], "std": [0.2603, 0.2566, 0.2713]
-    },
-    "tiny_imagenet": {
-        "num_classes": 200, "image_size": 32, "channels": 3,
-        "mean": [0.4802, 0.4481, 0.3975], "std": [0.2770, 0.2691, 0.2821]
     }
 }
-
-class _HFTinyImageNetDataset(Dataset):
-    def __init__(self, hf_split, transform):
-        self.hf_split = hf_split
-        self.transform = transform
-
-    def __len__(self):
-        return len(self.hf_split)
-
-    def __getitem__(self, idx):
-        item = self.hf_split[int(idx)]
-        img = item["image"].convert("RGB")
-        return self.transform(img), int(item["label"])
 
 def get_dataloaders(
     dataset: str,
@@ -80,11 +59,6 @@ def get_dataloaders(
                                        transform=train_tf)
         test_set = datasets.CIFAR10(data_root, train=False, download=True,
                                      transform=test_tf)
-    elif dataset == "cifar100":
-        train_full = datasets.CIFAR100(data_root, train=True, download=True,
-                                        transform=train_tf)
-        test_set = datasets.CIFAR100(data_root, train=False, download=True,
-                                      transform=test_tf)
     elif dataset == "svhn":
         train_full = datasets.SVHN(data_root, split="train", download=True,
                                     transform=train_tf)
@@ -97,11 +71,6 @@ def get_dataloaders(
                                      transform=resize_tf)
         test_set = datasets.STL10(data_root, split="test", download=True,
                                    transform=resize_test_tf)
-    elif dataset == "tiny_imagenet":
-        from datasets import load_dataset as hf_load
-        ds = hf_load("zh-plus/tiny-imagenet")
-        train_full = _HFTinyImageNetDataset(ds["train"], train_tf)
-        test_set = _HFTinyImageNetDataset(ds["valid"], test_tf)
     else:
         raise ValueError(f"Unknown dataset: {dataset!r}")
 
