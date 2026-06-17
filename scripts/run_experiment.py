@@ -82,8 +82,8 @@ def run(cfg: dict, dataset_override: str | None = None) -> dict:
     clip_grad = tr.get("clip_grad", 0.0)
     sparsity_lambda = tr.get("sparsity_lambda", _DEFAULT_SPARSITY_LAMBDA.get(method, 0.0))
 
-    ckpt_dir = Path(out["checkpoint_dir"])
-    log_dir = Path(out["log_dir"])
+    ckpt_dir = Path(out["checkpoint_dir"]) / backbone
+    log_dir = Path(out["log_dir"]) / backbone
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     seed_worker_fn, gen = set_seed(seed)

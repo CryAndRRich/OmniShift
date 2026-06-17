@@ -52,10 +52,9 @@ def run_estimate(cfg: dict, dataset_name: str | None = None) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description="FPGA resource estimation")
-    parser.add_argument("--config", help="YAML config path")
+    parser.add_argument("--config", required=True, help="YAML config path")
     parser.add_argument("--name", help="Override experiment.name")
     parser.add_argument("--dataset", help="Override dataset")
-    parser.add_argument("--baseline", action="store_true", help="Cross-config comparison table")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -77,7 +76,7 @@ def main():
     print(f"{'='*60}")
     print(f"FPGA (Artix-7 XC7A200T):")
     print(f"  DSP48E2 : {fpga['DSP48E2']:>6,} / {_TOTAL_DSP}  ({fpga['DSP_pct']:.1f}%)")
-    print(f"  LUT     : {fpga['LUT']/1e6:>6.2f}M / {_TOTAL_LUT/1e6:.1f}M  ({fpga['LUT_pct']:.1f}%)\n")
+    print(f"  LUT     : {fpga['LUT']/1e6:>6.2f}M / {_TOTAL_LUT/1e6:.1f}M  ({fpga['LUT_pct']:.1f}%)")
 
 if __name__ == "__main__":
     main()

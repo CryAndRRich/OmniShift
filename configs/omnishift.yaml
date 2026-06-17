@@ -1,6 +1,6 @@
 experiment:
   method: "omnishift"     # fp32 | deepshift | apot | denseshift | s3shift | fogzo | aptq | omnishift
-  backbone: "resnet20"    # resnet20 | resnet56 | resnet110
+  backbone: "resnet20"    # resnet20 | resnet56
   dataset: "cifar10"      # cifar10 | svhn | stl10
   name: ""                # auto: "<method>_<backbone>"
   seed: 42

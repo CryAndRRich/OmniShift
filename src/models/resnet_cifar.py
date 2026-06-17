@@ -60,7 +60,7 @@ class ResNetCIFAR(nn.Module):
 
     def _make_stage(self, planes, n_blocks, stride, make_conv, make_bn, make_act):
         strides = [stride] + [1] * (n_blocks - 1)
-        layers  = []
+        layers = []
         for s in strides:
             layers.append(_BasicBlock(self._in_planes, planes, s,
                                       make_conv, make_bn, make_act))
