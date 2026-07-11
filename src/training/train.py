@@ -54,6 +54,30 @@ def train_one_epoch(
     return loss_sum / total, correct / total
 
 @torch.no_grad()
+def reestimate_bn(model: nn.Module, loader, device, n_batches: int = 50) -> None:
+    """Re-estimate BN running statistics with the current (quantized) weights
+    (Nagel et al., ICML 2022). Uses momentum = 1/(i+1) so the result is the
+    cumulative average over the batches seen. Runs under no_grad, so
+    hysteresis/mask/freeze buffers in quantized modules do not advance."""
+    bns = [m for m in model.modules()
+           if hasattr(m, "running_mean") and hasattr(m, "momentum")]
+    if not bns:
+        return
+    saved = [m.momentum for m in bns]
+    was_training = model.training
+    model.train()
+    for i, (imgs, _) in enumerate(loader):
+        if i >= n_batches:
+            break
+        for m in bns:
+            m.momentum = 1.0 / (i + 1)
+        model(imgs.to(device, non_blocking=True))
+    for m, mom in zip(bns, saved):
+        m.momentum = mom
+    model.train(was_training)
+
+
+@torch.no_grad()
 def evaluate(
     model: nn.Module,
     loader,

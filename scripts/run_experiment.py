@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.data.loaders import get_dataloaders
 from src.models.resnet_cifar import build_model
-from src.training.train import train_one_epoch, evaluate
+from src.training.train import train_one_epoch, evaluate, reestimate_bn
 from src.training.scheduler import cosine_lr_schedule
 from src.utils.ops_counter import count_mul_add_shift, count_params
 from src.utils.seed import set_seed, clear_memory
@@ -28,6 +28,46 @@ _DEFAULT_SPARSITY_LAMBDA = {
     "omnishift": 1e-4
 }
 
+# Weight decay on BN affine params and quantizer params (log_alpha) distorts
+# clipping ranges and PoT scales; exclude them for omnishift. Baselines keep
+# the single-group optimizer so existing logged results stay reproducible.
+_DEFAULT_NO_WD_SCALES = {m: False for m in _DEFAULT_SPARSITY_LAMBDA}
+_DEFAULT_NO_WD_SCALES["omnishift"] = True
+
+
+def _make_optimizer(model, lr, momentum, weight_decay, no_wd_scales):
+    if not no_wd_scales:
+        return torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum,
+                               weight_decay=weight_decay)
+    decay, no_decay = [], []
+    for name, p in model.named_parameters():
+        if not p.requires_grad:
+            continue
+        # ndim <= 1 covers BN weight/bias, conv biases and scalar quantizer
+        # params such as log_alpha.
+        (no_decay if p.ndim <= 1 else decay).append(p)
+    return torch.optim.SGD(
+        [{"params": decay, "weight_decay": weight_decay},
+         {"params": no_decay, "weight_decay": 0.0}],
+        lr=lr, momentum=momentum)
+
+
+def _load_fp32_init(model, ckpt_dir, backbone, dataset, seed, init_from):
+    if not init_from:
+        return
+    if init_from == "auto":
+        path = Path(ckpt_dir) / f"fp32_{backbone}_{dataset}_seed{seed}.pt"
+    else:
+        path = Path(init_from)
+    if not path.exists():
+        print(f"[warn] init_from: {path} not found — training from scratch")
+        return
+    sd = torch.load(path, map_location="cpu")["state_dict"]
+    missing, unexpected = model.load_state_dict(sd, strict=False)
+    print(f"FP32 warm start <- {path}")
+    print(f"  loaded={len(sd) - len(unexpected)} tensors | "
+          f"kept_init={len(missing)} | skipped={len(unexpected)}")
+
 def build_cfg(method: str,
               backbone: str = "resnet20",
               dataset: str = "cifar10",
@@ -43,6 +83,7 @@ def build_cfg(method: str,
             "dataset": dataset,
             "name": name,
             "seed": seed,
+            "init_from": "auto" if method == "omnishift" else "",
             "method_opts": method_opts
         },
         "training": {
@@ -72,6 +113,7 @@ def run(cfg: dict, dataset_override: str | None = None) -> dict:
     run_name = exp.get("name", f'{method}_{backbone}')
     seed = exp.get("seed", 42)
     method_opts = exp.get("method_opts", {})
+    init_from = exp.get("init_from", "")
 
     epochs = tr["epochs"]
     batch_size = tr["batch_size"]
@@ -117,9 +159,11 @@ def run(cfg: dict, dataset_override: str | None = None) -> dict:
           f"Shift={ops['shift_G']:.4f}G | Energy={ops['energy_GpJ']:.4f} GpJ | "
           f"Sparsity={ops['sparsity']:.1%}\n")
 
+    _load_fp32_init(model, ckpt_dir, backbone, dataset_name, seed, init_from)
+
     scaler = torch.cuda.amp.GradScaler() if device == "cuda" else None
-    optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=momentum,
-                                weight_decay=weight_decay)
+    no_wd_scales = tr.get("no_wd_scales", _DEFAULT_NO_WD_SCALES.get(method, False))
+    optimizer = _make_optimizer(model, lr, momentum, weight_decay, no_wd_scales)
     scheduler = cosine_lr_schedule(optimizer, epochs, len(train_loader),
                                     warmup_epochs=warmup_epochs)
 
@@ -141,6 +185,12 @@ def run(cfg: dict, dataset_override: str | None = None) -> dict:
         sp_tag = ""
         if hasattr(model, "get_global_sparsity"):
             sp_tag = f" | sp={model.get_global_sparsity():.2%}"
+        flip_rate = frozen_frac = 0.0
+        if hasattr(model, "get_flip_rate"):
+            flip_rate = model.get_flip_rate()
+            frozen_frac = model.get_frozen_frac()
+            if flip_rate > 0 or frozen_frac > 0:
+                sp_tag += f" | flip={flip_rate:.4f} | frz={frozen_frac:.2%}"
 
         if val_acc > best_val:
             best_val = val_acc
@@ -153,7 +203,8 @@ def run(cfg: dict, dataset_override: str | None = None) -> dict:
 
         dt = time.time() - t0
         log.append(dict(epoch=epoch, tr_loss=tr_loss, tr_acc=tr_acc,
-                        val_loss=val_loss, val_acc=val_acc, time=dt))
+                        val_loss=val_loss, val_acc=val_acc, time=dt,
+                        flip_rate=flip_rate, frozen_frac=frozen_frac))
         print(f"[E{epoch + 1:3d}] tr={tr_loss:.4f}/{tr_acc:.4f} | "
               f"val={val_loss:.4f}/{val_acc:.4f} | best={best_val:.4f}{star}"
               f"{sp_tag} | {dt:.1f}s")
@@ -161,6 +212,9 @@ def run(cfg: dict, dataset_override: str | None = None) -> dict:
 
     model.load_state_dict(best_state)
     set_bn_epoch(model, 999)
+    from src.quantize.pot_bn import PoTBatchNorm2d
+    if any(isinstance(m, PoTBatchNorm2d) for m in model.modules()):
+        reestimate_bn(model, train_loader, device, n_batches=50)
     _, test_acc = evaluate(model, test_loader, device)
 
     final_sparsity = (model.get_global_sparsity()
@@ -212,6 +266,8 @@ def main():
     parser.add_argument("--method", default=None, help="Override experiment.method")
     parser.add_argument("--dataset", default=None, help="Override experiment.dataset")
     parser.add_argument("--name", default=None, help="Override experiment.name")
+    parser.add_argument("--init-from", default=None,
+                        help="FP32 warm-start: checkpoint path or 'auto'")
     args = parser.parse_args()
 
     with open(args.config) as f:
@@ -221,6 +277,8 @@ def main():
         cfg["experiment"]["method"] = args.method
     if args.name:
         cfg["experiment"]["name"] = args.name
+    if args.init_from is not None:
+        cfg["experiment"]["init_from"] = args.init_from
 
     result = run(cfg, dataset_override=args.dataset)
     print(f'  test_acc   : {result["test_acc"]:.4f}')

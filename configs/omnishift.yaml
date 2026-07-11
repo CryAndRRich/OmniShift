@@ -4,6 +4,7 @@ experiment:
   dataset: "cifar10"      # cifar10 | svhn | stl10
   name: ""                # auto: "<method>_<backbone>"
   seed: 42
+  init_from: "auto"       # "" = from scratch | "auto" = fp32 ckpt cùng backbone/dataset/seed | hoặc path
 
 training:
   epochs: 200

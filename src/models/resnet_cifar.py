@@ -91,6 +91,18 @@ class ResNetCIFAR(nn.Module):
         mods = [m for m in self.modules() if isinstance(m, _SPARSE_TYPES)]
         return sum(m.get_actual_sparsity() for m in mods) / len(mods) if mods else 0.0
 
+    @torch.no_grad()
+    def get_flip_rate(self) -> float:
+        mods = [m for m in self.modules()
+                if m is not self and hasattr(m, "get_flip_rate")]
+        return sum(m.get_flip_rate() for m in mods) / len(mods) if mods else 0.0
+
+    @torch.no_grad()
+    def get_frozen_frac(self) -> float:
+        mods = [m for m in self.modules()
+                if m is not self and hasattr(m, "get_frozen_frac")]
+        return sum(m.get_frozen_frac() for m in mods) / len(mods) if mods else 0.0
+
 SUPPORTED_BACKBONES = list(ResNetCIFAR.STAGE_CONFIGS)
 
 def build_model(backbone: str, method: str,
